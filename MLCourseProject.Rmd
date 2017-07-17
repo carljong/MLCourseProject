@@ -1,0 +1,146 @@
+---
+title: "Exercise prediction using monitor data"
+author: "Carl Konopka"
+date: "July 14, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+
+#Executive Summary
+
+We were given both training and test data from the following study:  Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz4n5nZTh9R
+
+We decided to use a random forest model to predict exercise types based on meter readings.  Our data cleaning resulted in a little over 50 variables being used for the model.  The random forest model yielded over 99% accuracy. Our predictions based on the test set are at the end of our report.
+
+#How Model was Built
+
+##Data Loading
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+```{r}
+initial_training<-read.table("/Users/carlkonopka/Downloads/pml-training.csv", header=TRUE, sep=",", na.strings = c("NA","",'#DIV/0!'))
+dim(initial_training)
+initial_testing<-read.table("/Users/carlkonopka/Downloads/pml-testing.csv",header=TRUE, sep=",", na.strings = c("NA","",'#DIV/0!'))
+dim(initial_testing)
+                            
+```
+
+Load the caret package
+
+```{r}
+library(caret)
+```
+
+##Data Cleaning
+
+Because regression models are affected by missing values, we'll first remove variables with missing values by taking only columns with no NA values.
+
+```{r}
+initial_training <- initial_training[,(colSums(is.na(initial_training)) == 0)]
+dim(initial_training)
+initial_testing <- initial_testing[,(colSums(is.na(initial_testing)) == 0)]
+dim(initial_testing)
+
+```
+We'll remove the columns that don't contain sensor measurement informtion
+
+```{r }
+# find columns not containing sensor measurement data
+idx <- grep("^X$|user_name|timestamp|window", names(initial_training))
+# check
+length(idx)
+# remove columns
+initial_training <- initial_training[-idx]
+initial_testing <- initial_testing[-idx]
+```
+
+We will use the nearZeroVar function from the caret package to remove variables with zero variance, which will have little impact on the prediction.
+
+```{r}
+nzv <- nearZeroVar(initial_training,saveMetrics=TRUE)
+initial_training <- initial_training[,nzv$nzv==FALSE]
+dim(initial_training)
+
+nzv <- nearZeroVar(initial_testing,saveMetrics=TRUE)
+initial_testing <- initial_testing[,nzv$nzv==FALSE]
+dim(initial_testing)
+```
+
+We are down to 53 columns (variables) from 160
+
+##Training and Testing Data
+
+We'll use 75% of our training data to build the model and the remaining 25% of the training data to validate it.
+
+```{r}
+set.seed(112345)
+Train<- createDataPartition(initial_training$classe, p=3/4, list=FALSE)
+training<- initial_training[Train, ]
+validation <- initial_training[-Train, ]
+dim(training) ;
+dim(validation)
+```
+
+#Model Selection - Why?
+
+We decided to first try a random forest (RF) model.  The other model we are considering is the gradient boosting machine (GBM), however, the RF is much easier to tune than the GBM and the RF is harder to overfit than the GBM. 
+
+#Use of Cross Validation
+
+We decided to use cross validation with 10 folds.  A lower value of K would be more biased and undesirable. A higher value of K is less biased, but can suffer from large variability.  Hopefully, 10 is a happy medium.
+
+#Model fitting
+
+```{r}
+library(randomForest)
+modFitrf <- train(classe ~., method="rf", data=training, trControl=trainControl(method='cv'), number=5, allowParallel=TRUE, importance=TRUE )
+modFitrf
+
+varImp(modFitrf)
+
+```
+
+
+
+
+#Out of Sample Error
+
+The out of sample error is the error rate of the model when it predicts using a different data set used to formulate it.  
+
+```{r}
+validationpredict=predict(modFitrf,validation)
+print(confusionMatrix(validationpredict,validation$classe),digits = 4)
+
+
+```
+
+
+##The out of sample error rate is: .71%
+
+#Final Prediction
+
+We'll use our model to make predictions of the exercises being performed based on our test data.
+
+```{r}
+testingpredict=predict(modFitrf,initial_testing)
+modFitrf$finalModel
+
+
+print(testingpredict)
+```
